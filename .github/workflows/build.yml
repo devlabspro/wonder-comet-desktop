@@ -27,7 +27,7 @@ jobs:
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 170
+    timeout-minutes: 300
     strategy:
       fail-fast: false
       matrix:
@@ -67,8 +67,9 @@ jobs:
           # macOS allows 256 open files by default; the bundle has ~40k files.
           ulimit -n 65536 2>/dev/null || ulimit -n 10240 || true
           if [ "$RUNNER_OS" = "macOS" ]; then
-            # Ad-hoc signature: Apple silicon needs one to launch; no Developer ID yet.
-            npx electron-builder --mac --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false
+            # No Developer ID yet: skip per-file signing; scripts/after-sign.cjs gives
+            # the finished app one ad-hoc signature (Apple silicon needs one to launch).
+            DESKTOP_ADHOC_SIGN=1 npx electron-builder --mac --publish never -c.mac.identity=null -c.mac.hardenedRuntime=false
           else
             npx electron-builder --win --publish never
           fi
