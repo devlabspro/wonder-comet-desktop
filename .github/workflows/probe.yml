@@ -3,7 +3,7 @@ on: workflow_dispatch
 permissions: { contents: read }
 jobs:
   probe:
-    strategy: { matrix: { os: [macos-14, macos-13] } }
+    strategy: { fail-fast: false, matrix: { os: [ubuntu-latest, macos-latest, macos-15-intel] } }
     runs-on: ${{ matrix.os }}
     steps:
-      - run: uname -a && sw_vers && sysctl -n machdep.cpu.brand_string && df -h / | tail -1
+      - run: uname -a
