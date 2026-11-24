@@ -127,4 +127,4 @@ jobs:
             "${assets[@]}"
       - name: Remove the source draft
         if: success()
-        run: gh release delete "${{ inputs.source_tag }}" --repo "${{ github.repository }}" --yes --cleanup-tag
+        run: gh release delete "${{ inputs.source_tag }}" --repo "${{ github.repository }}" --yes
