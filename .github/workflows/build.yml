@@ -1,0 +1,122 @@
+name: Build desktop installers
+
+# Builds Wonder Comet desktop on GitHub's Windows and macOS runners, smoke-tests
+# each packaged editor with a real import, edit and export, and leaves a DRAFT
+# release v<version> with every installer and update feed. The source comes from
+# a private draft release (source_tag) uploaded by
+# apps/desktop/scripts/release-desktop.ps1 in devlabspro/ai-video-editor; draft
+# releases and their files are visible only to people with write access.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: App version, for example 1.0.1
+        required: true
+      source_tag:
+        description: Draft release tag holding source.tar.gz
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 170
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x64, os: windows-latest }
+          - { name: mac-arm64, os: macos-latest }
+          - { name: mac-x64, os: macos-15-intel }
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NEXT_TELEMETRY_DISABLED: '1'
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - name: Fetch source
+        shell: bash
+        run: |
+          gh release download "${{ inputs.source_tag }}" --repo "${{ github.repository }}" --pattern source.tar.gz --dir .
+          mkdir src && tar -xzf source.tar.gz -C src && rm source.tar.gz
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        shell: bash
+        run: |
+          npm --prefix src/renderer ci --no-audit --no-fund
+          npm --prefix src/frontend ci --no-audit --no-fund
+          npm --prefix src/apps/desktop ci --no-audit --no-fund
+          npm --prefix src/apps/desktop version "${{ inputs.version }}" --no-git-tag-version --allow-same-version
+      - name: Assemble the local editor
+        run: node src/apps/desktop/scripts/build-stack.mjs
+      - name: Package
+        shell: bash
+        working-directory: src/apps/desktop
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # Ad-hoc signature: Apple silicon needs one to launch; no Developer ID yet.
+            npx electron-builder --mac --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false
+          else
+            npx electron-builder --win --publish never
+          fi
+      - name: Smoke-test the packaged editor (import, edit, 1080p export)
+        shell: bash
+        working-directory: src/apps/desktop
+        run: node scripts/smoke-test.mjs --full
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.name }}-logs
+          path: ${{ runner.temp }}/wc-smoke/logs
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          if-no-files-found: error
+          path: |
+            src/apps/desktop/dist/*.exe
+            src/apps/desktop/dist/*.dmg
+            src/apps/desktop/dist/*.zip
+            src/apps/desktop/dist/latest*.yml
+            src/apps/desktop/dist/*.blockmap
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+      - name: Combine the macOS update feeds
+        run: |
+          node -e '
+          const fs = require("fs");
+          const read = (f) => fs.readFileSync(f, "utf8");
+          const files = (t) => t.slice(t.indexOf("files:\n") + 7, t.indexOf("\npath:")).trimEnd();
+          const arm = read("out/mac-arm64/latest-mac.yml"), x64 = read("out/mac-x64/latest-mac.yml");
+          const merged = x64.slice(0, x64.indexOf("files:\n") + 7) + files(arm) + "\n" + files(x64) + x64.slice(x64.indexOf("\npath:"));
+          fs.writeFileSync("out/latest-mac.yml", merged);
+          console.log(merged);'
+      - name: Draft release
+        run: |
+          shopt -s nullglob
+          assets=(out/windows-x64/*.exe out/windows-x64/*.blockmap out/windows-x64/latest.yml
+                  out/mac-arm64/*.dmg out/mac-arm64/*.zip out/mac-arm64/*.blockmap
+                  out/mac-x64/*.dmg out/mac-x64/*.zip out/mac-x64/*.blockmap out/latest-mac.yml)
+          gh release create "v${{ inputs.version }}" --repo "${{ github.repository }}" --draft \
+            --title "Wonder Comet ${{ inputs.version }}" \
+            --notes "Windows: WonderComet-Setup.exe · Mac (Apple silicon): WonderComet-mac-arm64.dmg · Mac (Intel): WonderComet-mac-x64.dmg. Install steps: https://wondercomet.com/download" \
+            "${assets[@]}"
+      - name: Remove the source draft
+        if: success()
+        run: gh release delete "${{ inputs.source_tag }}" --repo "${{ github.repository }}" --yes --cleanup-tag
