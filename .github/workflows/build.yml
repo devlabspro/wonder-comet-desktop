@@ -56,11 +56,16 @@ jobs:
           npm --prefix src/apps/desktop ci --no-audit --no-fund
           npm --prefix src/apps/desktop version "${{ inputs.version }}" --no-git-tag-version --allow-same-version
       - name: Assemble the local editor
-        run: node src/apps/desktop/scripts/build-stack.mjs
+        shell: bash
+        run: |
+          ulimit -n 65536 2>/dev/null || ulimit -n 10240 || true
+          node src/apps/desktop/scripts/build-stack.mjs
       - name: Package
         shell: bash
         working-directory: src/apps/desktop
         run: |
+          # macOS allows 256 open files by default; the bundle has ~40k files.
+          ulimit -n 65536 2>/dev/null || ulimit -n 10240 || true
           if [ "$RUNNER_OS" = "macOS" ]; then
             # Ad-hoc signature: Apple silicon needs one to launch; no Developer ID yet.
             npx electron-builder --mac --publish never -c.mac.identity=- -c.mac.hardenedRuntime=false
@@ -70,7 +75,9 @@ jobs:
       - name: Smoke-test the packaged editor (import, edit, 1080p export)
         shell: bash
         working-directory: src/apps/desktop
-        run: node scripts/smoke-test.mjs --full
+        run: |
+          ulimit -n 65536 2>/dev/null || ulimit -n 10240 || true
+          node scripts/smoke-test.mjs --full
       - uses: actions/upload-artifact@v4
         if: always()
         with:
