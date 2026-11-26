@@ -55,6 +55,9 @@ jobs:
           npm --prefix src/frontend ci --no-audit --no-fund
           npm --prefix src/apps/desktop ci --no-audit --no-fund
           npm --prefix src/apps/desktop version "${{ inputs.version }}" --no-git-tag-version --allow-same-version
+      - name: Desktop routing and lifecycle tests
+        shell: bash
+        run: npm --prefix src/apps/desktop test
       - name: Assemble the local editor
         shell: bash
         run: |
@@ -73,6 +76,14 @@ jobs:
           else
             npx electron-builder --win --publish never
           fi
+      - name: Packaged shell startup, settings and shutdown
+        timeout-minutes: 10
+        shell: bash
+        working-directory: src/apps/desktop
+        run: |
+          app=$(find dist -name app.asar -print -quit)
+          test -n "$app"
+          WONDER_COMET_STACK="$(dirname "$app")/stack" node tests/desktop.cjs "$app"
       - name: Smoke-test the packaged editor (import, edit, 1080p export)
         shell: bash
         working-directory: src/apps/desktop
@@ -83,7 +94,9 @@ jobs:
         if: always()
         with:
           name: ${{ matrix.name }}-logs
-          path: ${{ runner.temp }}/wc-smoke/logs
+          path: |
+            ${{ runner.temp }}/wc-smoke-*/logs
+            ${{ runner.temp }}/wc-desktop-test-*/logs
           if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         with:
